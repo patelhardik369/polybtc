@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BTC Dashboard</title>
+<style>
+  :root {
+    --bg: #000;
+    --fg: #ececec;
+    --dim: #6a6a6a;
+    --line: #1a1a1a;
+    --green: #00d68f;
+    --red: #ff4d6d;
+    --yellow: #f5c451;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg); color: var(--fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    height: 100%; -webkit-font-smoothing: antialiased;
+  }
+  body { display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .app { width: 100%; max-width: 880px; display: grid; gap: 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 12px; font-weight: 500; letter-spacing: 0.18em; color: var(--dim); text-transform: uppercase; }
+  .clock { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  .prog { height: 3px; width: 100%; background: var(--line); overflow: hidden; }
+  .prog > div { height: 100%; width: 0%; background: var(--fg); }
+
+  .card { border: 1px solid var(--line); padding: 22px 24px; background: #050505; }
+  .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .label { font-size: 10px; letter-spacing: 0.22em; color: var(--dim); text-transform: uppercase; }
+  .conn { font-size: 10px; letter-spacing: 0.14em; color: var(--dim); text-transform: uppercase; }
+  .conn.on { color: var(--green); }
+  .conn.err { color: var(--red); }
+  .conn.warn { color: var(--yellow); }
+  .conn .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 6px; vertical-align: middle; opacity: .9; }
+
+  .price-row { display: flex; align-items: baseline; gap: 16px; }
+  .price { font-size: 44px; font-weight: 500; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .delta { font-size: 14px; font-variant-numeric: tabular-nums; color: var(--dim); }
+  .delta.up { color: var(--green); }
+  .delta.down { color: var(--red); }
+
+  .bar { display: flex; height: 6px; width: 100%; background: var(--line); overflow: hidden; margin: 14px 0 10px; }
+  .bar > div { height: 100%; transition: width 0.1s linear; }
+  .bar .buy { background: var(--green); }
+  .bar .sell { background: var(--red); }
+
+  .row { display: flex; justify-content: space-between; align-items: center; font-variant-numeric: tabular-nums; }
+  .row .left, .row .right { display: flex; align-items: center; gap: 8px; }
+  .pct { font-size: 22px; font-weight: 500; }
+  .pct.buy { color: var(--green); }
+  .pct.sell { color: var(--red); }
+  .side-tag { font-size: 10px; letter-spacing: 0.18em; color: var(--dim); text-transform: uppercase; }
+  .meta { font-size: 11px; color: var(--dim); margin-top: 8px; }
+  .meta span { color: var(--fg); }
+
+  .pm-question { font-size: 13px; color: var(--fg); margin-bottom: 12px; line-height: 1.4; }
+  .pm-rows { display: grid; gap: 0; }
+  .pm-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .pm-row:last-child { border-bottom: 0; }
+  .pm-row .name { font-size: 13px; color: var(--fg); }
+  .pm-row .val { font-size: 22px; font-variant-numeric: tabular-nums; transition: color .2s; }
+  .pm-row.up .val { color: var(--green); }
+  .pm-row.down .val { color: var(--red); }
+
+  footer { font-size: 10px; color: var(--dim); text-align: center; letter-spacing: 0.1em; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>BTC · Dashboard</h1>
+    <span id="clock" class="clock">—</span>
+  </header>
+
+  <div class="prog"><div id="progBar"></div></div>
+
+  <!-- BTC live price -->
+  <section class="card">
+    <div class="card-head">
+      <span class="label">BTC / USDT — Spot</span>
+      <span id="bnConn" class="conn"><span class="dot"></span>connecting…</span>
+    </div>
+    <div class="price-row">
+      <div id="price" class="price">—</div>
+      <div id="delta" class="delta">—</div>
+    </div>
+    <div class="meta">last tick <span id="priceTs">—</span> · open <span id="candleOpen">—</span></div>
+  </section>
+
+  <!-- live order book bid/ask imbalance -->
+  <section class="card">
+    <div class="card-head">
+      <span class="label">Order Book · Bid / Ask · Top 20 · Live</span>
+      <span id="obConn" class="conn"><span class="dot"></span>connecting…</span>
+    </div>
+    <div class="row">
+      <div class="left">
+        <span class="side-tag">Bid</span>
+        <span id="buyPct" class="pct buy">—</span>
+      </div>
+      <div class="right">
+        <span id="sellPct" class="pct sell">—</span>
+        <span class="side-tag">Ask</span>
+      </div>
+    </div>
+    <div class="bar">
+      <div id="buyBar" class="buy" style="width:50%"></div>
+      <div id="sellBar" class="sell" style="width:50%"></div>
+    </div>
+    <div class="meta">
+      bid <span id="bidVol">—</span> BTC · ask <span id="askVol">—</span> BTC
+    </div>
+  </section>
+
+  <!-- Polymarket -->
+  <section class="card">
+    <div class="card-head">
+      <span class="label">Polymarket · BTC Up/Down · 5m</span>
+      <span id="pmConn" class="conn"><span class="dot"></span>discovering…</span>
+    </div>
+    <div id="pmTitle" class="pm-question">searching for current 5-minute market…</div>
+    <div id="pmRows" class="pm-rows">
+      <div class="pm-row up"><div class="name">Up</div><div class="val">—</div></div>
+      <div class="pm-row down"><div class="name">Down</div><div class="val">—</div></div>
+    </div>
+    <div class="meta">resolves in <span id="pmEta">—</span> · next market auto-loads</div>
+  </section>
+
+  <footer>binance · data-stream.binance.vision  ·  polymarket · ws-subscriptions-clob</footer>
+</div>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const fmtUsd = n => n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+const fmtPct = n => (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
+const hhmmss = (ts = Date.now()) => new Date(ts).toLocaleTimeString("en-US", { hour12: false });
+const setConn = (el, state, text) => { if (!el) return; el.className = "conn " + (state || ""); el.innerHTML = `<span class="dot"></span>${text}`; };
+
+function fmtRemain(ms) {
+  if (ms < 0) ms = 0;
+  const m = Math.floor(ms / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+// -------------------------------------------------------------------------
+// Binance: ticker + kline_5m streams (public market-data endpoint)
+// -------------------------------------------------------------------------
+const BN_HOSTS = [
+  "wss://data-stream.binance.vision:443",
+  "wss://stream.binance.com:9443",
+  "wss://stream.binance.us:9443",
+];
+
+function makeBinanceStream(streamName, statusEl, onMsg) {
+  let hostIdx = 0;
+  let ws = null;
+  let openedOnce = false;
+
+  function connect() {
+    const host = BN_HOSTS[hostIdx];
+    setConn(statusEl, "warn", `connecting · ${host.split("//")[1].split(":")[0]}`);
+    ws = new WebSocket(`${host}/ws/${streamName}`);
+
+    const failoverTimer = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        try { ws.close(); } catch {}
+      }
+    }, 6000);
+
+    ws.onopen = () => {
+      clearTimeout(failoverTimer);
+      openedOnce = true;
+      setConn(statusEl, "on", "live");
+    };
+    ws.onmessage = e => onMsg(JSON.parse(e.data));
+    ws.onerror = () => { /* let close handle reconnect */ };
+    ws.onclose = () => {
+      clearTimeout(failoverTimer);
+      if (!openedOnce && hostIdx < BN_HOSTS.length - 1) {
+        hostIdx++;
+        setTimeout(connect, 300);
+      } else {
+        setConn(statusEl, "err", "disconnected · retry");
+        setTimeout(connect, 2500);
+      }
+    };
+  }
+  connect();
+}
+
+// Track open of the current 5-minute candle so we can show a 5m delta.
+// k.t is the candle start ms — when it changes we know a new candle started.
+let candleOpen = null;
+let candleStartMs = null;
+let lastPrice = null;
+
+const fmtUsdSigned = n => (n >= 0 ? "+" : "−") + Math.abs(n).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+
+function renderDelta() {
+  if (lastPrice == null || candleOpen == null) return;
+  const diff = lastPrice - candleOpen;
+  const pct = (diff / candleOpen) * 100;
+  const de = $("delta");
+  de.textContent = fmtUsdSigned(diff) + "  " + fmtPct(pct);
+  de.className = "delta " + (diff >= 0 ? "up" : "down");
+}
+
+makeBinanceStream("btcusdt@ticker", $("bnConn"), d => {
+  const last = parseFloat(d.c);
+  if (!isFinite(last)) return;
+  lastPrice = last;
+  $("price").textContent = fmtUsd(last);
+  $("priceTs").textContent = hhmmss();
+  renderDelta();
+});
+
+// Lightweight kline subscription — only used to capture the open price of the
+// current 5-min candle (and re-snap when a new candle starts).
+makeBinanceStream("btcusdt@kline_5m", null, payload => {
+  const k = payload.k;
+  if (!k) return;
+  if (candleStartMs !== k.t) {
+    candleStartMs = k.t;
+    candleOpen = parseFloat(k.o);
+    $("candleOpen").textContent = fmtUsd(candleOpen);
+  }
+  renderDelta();
+});
+
+// Top-20 partial-book depth, updated every 100ms — coalesce DOM writes via rAF
+// so we only paint once per frame even if multiple ticks land in the same frame.
+const obEls = {
+  buyPct: $("buyPct"), sellPct: $("sellPct"),
+  buyBar: $("buyBar"), sellBar: $("sellBar"),
+  bidVol: $("bidVol"), askVol: $("askVol"),
+};
+let obState = null, obRenderQueued = false;
+makeBinanceStream("btcusdt@depth20@100ms", $("obConn"), payload => {
+  const bids = payload.bids || [];
+  const asks = payload.asks || [];
+  if (!bids.length || !asks.length) return;
+  let bidVol = 0, askVol = 0;
+  for (const [, qty] of bids) bidVol += parseFloat(qty);
+  for (const [, qty] of asks) askVol += parseFloat(qty);
+  const total = bidVol + askVol;
+  if (!total) return;
+  let bidPct = (bidVol / total) * 100;
+  bidPct = Math.max(0, Math.min(100, bidPct));
+  obState = { bidPct, askPct: 100 - bidPct, bidVol, askVol };
+  if (obRenderQueued) return;
+  obRenderQueued = true;
+  requestAnimationFrame(() => {
+    obRenderQueued = false;
+    const s = obState; if (!s) return;
+    obEls.buyPct.textContent  = s.bidPct.toFixed(1) + "%";
+    obEls.sellPct.textContent = s.askPct.toFixed(1) + "%";
+    obEls.buyBar.style.width  = s.bidPct + "%";
+    obEls.sellBar.style.width = s.askPct + "%";
+    obEls.bidVol.textContent  = s.bidVol.toFixed(3);
+    obEls.askVol.textContent  = s.askVol.toFixed(3);
+  });
+});
+
+// -------------------------------------------------------------------------
+// Polymarket: auto-discover & auto-rotate 5-minute BTC up/down markets
+// -------------------------------------------------------------------------
+const PM_WS = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
+// Polymarket data is fetched via the local Python backend (see poly_proxy.py).
+// gamma-api restricts CORS to polymarket.com, so the page can't hit it
+// directly — the backend does the request server-side and returns parsed JSON.
+const POLY_API = "/poly/slug/";
+const FETCH_TIMEOUT_MS = 4500;
+
+let pmMarket = null;
+let pmTokens = null;
+let pmWs = null;
+let pmPing = null;
+let pmRotateTimer = null;
+let pmPrefetchTimer = null;
+let pmNextMarket = null;
+let pmWsGen = 0;        // generation counter — stale handlers no-op
+let pmRetryDelay = 1500;
+let pmReconnectTimer = null;
+
+function currentSlotStartSec() {
+  return Math.floor(Date.now() / 300_000) * 300;
+}
+
+async function fetchMarketBySlug(slug) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const r = await fetch(POLY_API + encodeURIComponent(slug), {
+      signal: ctrl.signal, cache: "no-store",
+    });
+    if (r.status === 404) return null;
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || `HTTP ${r.status}`);
+    }
+    return await r.json();
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("timeout");
+    if (e instanceof TypeError) throw new Error("backend unreachable — is poly_proxy.py running?");
+    throw e;
+  } finally { clearTimeout(t); }
+}
+
+async function discoverCurrentMarket() {
+  const slot = currentSlotStartSec();
+  // Slug timestamp = start of the 5-min observation window; endDate = slot + 300.
+  // Current market = the one resolving at the next boundary (endMs in (now, now+300_000]).
+  // Run candidates in parallel — even if one proxy hangs (timeout caps it), the
+  // others can still finish and we never block the whole discovery.
+  const candidates = [slot, slot - 300, slot + 300];
+  const results = await Promise.allSettled(
+    candidates.map(s => fetchMarketBySlug(`btc-updown-5m-${s}`))
+  );
+  const now = Date.now();
+  let lastErr = null;
+  for (const r of results) {
+    if (r.status === "rejected") { lastErr = r.reason; continue; }
+    const m = r.value;
+    if (!m) continue;
+    const dt = m.endMs - now;
+    if (dt > 0 && dt <= 300_000) return { market: m, error: null };
+  }
+  return { market: null, error: lastErr || new Error("no current market matched") };
+}
+
+function localQuestionFor(m) {
+  return m.question;
+}
+
+function applyMarket(m) {
+  pmMarket = m;
+  const ip = m.initialPrices || [];
+  pmTokens = {
+    a: { id: m.tokenIds[0], name: m.outcomes[0] || "Up",   price: ip[0] != null ? parseFloat(ip[0]) : null },
+    b: { id: m.tokenIds[1], name: m.outcomes[1] || "Down", price: ip[1] != null ? parseFloat(ip[1]) : null },
+  };
+  $("pmTitle").textContent = localQuestionFor(m);
+  buildPmRows();
+  renderPm();
+  connectPmWs();
+  scheduleNext(m);
+}
+
+function scheduleNext(m) {
+  if (pmRotateTimer)   { clearTimeout(pmRotateTimer);   pmRotateTimer = null; }
+  if (pmPrefetchTimer) { clearTimeout(pmPrefetchTimer); pmPrefetchTimer = null; }
+  pmNextMarket = null;
+
+  const now = Date.now();
+  pmPrefetchTimer = setTimeout(prefetchNext, Math.max(0, m.endMs - now - 8_000));
+  // Rotate exactly at the boundary (small +50 ms buffer for clock skew).
+  pmRotateTimer   = setTimeout(rotateMarket,  Math.max(0, m.endMs - now + 50));
+}
+
+async function prefetchNext() {
+  if (!pmMarket) return;
+  const nextSlotSec = Math.floor(pmMarket.endMs / 1000);
+  try {
+    const m = await fetchMarketBySlug(`btc-updown-5m-${nextSlotSec}`);
+    if (m && m.endMs > Date.now()) pmNextMarket = m;
+  } catch { /* fallback handled at rotation */ }
+}
+
+async function rotateMarket() {
+  // Fast path: prefetched market is ready — swap instantly.
+  if (pmNextMarket && pmNextMarket.endMs > Date.now()) {
+    const m = pmNextMarket;
+    pmNextMarket = null;
+    applyMarket(m);
+    return;
+  }
+  // Fallback: fetch directly using the next slug we already know.
+  setConn($("pmConn"), "warn", "loading next market…");
+  if (pmMarket) {
+    const nextSlotSec = Math.floor(pmMarket.endMs / 1000);
+    try {
+      const m = await fetchMarketBySlug(`btc-updown-5m-${nextSlotSec}`);
+      if (m && m.endMs > Date.now()) { applyMarket(m); return; }
+    } catch {}
+  }
+  // Last resort: full discovery loop.
+  loadAndConnectPm();
+}
+
+async function loadAndConnectPm() {
+  setConn($("pmConn"), "warn", "discovering…");
+  const { market: m, error } = await discoverCurrentMarket();
+  if (!m) {
+    const reason = error ? error.message : "no slug match";
+    setConn($("pmConn"), "err", "discovery failed · " + reason);
+    $("pmTitle").textContent = "couldn't load current 5-minute market (" + reason + ") — retrying…";
+    if (pmRotateTimer) clearTimeout(pmRotateTimer);
+    pmRotateTimer = setTimeout(loadAndConnectPm, 4000);
+    return;
+  }
+  applyMarket(m);
+}
+
+// Build the two rows once per market — subsequent updates only mutate text.
+const pmValEls = { a: null, b: null };
+function buildPmRows() {
+  const rows = $("pmRows");
+  rows.innerHTML = "";
+  for (const k of ["a", "b"]) {
+    const t = pmTokens[k];
+    const cls = (t.name || "").toLowerCase().includes("down") ? "down" : "up";
+    const row = document.createElement("div");
+    row.className = "pm-row " + cls;
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = t.name;
+    const val = document.createElement("div");
+    val.className = "val";
+    val.textContent = "—";
+    row.appendChild(name);
+    row.appendChild(val);
+    rows.appendChild(row);
+    pmValEls[k] = val;
+  }
+}
+
+let pmRenderQueued = false;
+function renderPm() {
+  if (pmRenderQueued) return;
+  pmRenderQueued = true;
+  requestAnimationFrame(() => {
+    pmRenderQueued = false;
+    if (!pmTokens) return;
+    for (const k of ["a", "b"]) {
+      const el = pmValEls[k];
+      if (!el) continue;
+      const p = pmTokens[k].price;
+      const next = p == null ? "—" : (p * 100).toFixed(1) + "%";
+      if (el.textContent !== next) el.textContent = next;
+    }
+  });
+}
+
+function midpointFromBook(book) {
+  const bids = book.bids || [];
+  const asks = book.asks || [];
+  const bestBid = bids.length ? Math.max(...bids.map(x => parseFloat(x.price))) : null;
+  const bestAsk = asks.length ? Math.min(...asks.map(x => parseFloat(x.price))) : null;
+  if (bestBid != null && bestAsk != null) return (bestBid + bestAsk) / 2;
+  return bestBid ?? bestAsk;
+}
+
+function tearDownPmWs() {
+  if (pmReconnectTimer) { clearTimeout(pmReconnectTimer); pmReconnectTimer = null; }
+  if (pmPing) { clearInterval(pmPing); pmPing = null; }
+  if (pmWs) {
+    // Detach handlers FIRST so the async onclose from our own close() can't
+    // re-enter connectPmWs and cause the live ↔ disconnected flicker.
+    try { pmWs.onopen = pmWs.onmessage = pmWs.onerror = pmWs.onclose = null; } catch {}
+    try { pmWs.close(); } catch {}
+    pmWs = null;
+  }
+}
+
+function connectPmWs() {
+  tearDownPmWs();
+  if (!pmTokens) return;
+
+  const myGen = ++pmWsGen;
+  setConn($("pmConn"), "warn", "connecting…");
+  const ws = new WebSocket(PM_WS);
+  pmWs = ws;
+
+  const isStale = () => myGen !== pmWsGen;
+
+  ws.onopen = () => {
+    if (isStale()) return;
+    setConn($("pmConn"), "on", "live");
+    pmRetryDelay = 1500; // reset backoff on a successful open
+    try {
+      ws.send(JSON.stringify({
+        type: "market",
+        assets_ids: [pmTokens.a.id, pmTokens.b.id],
+        markets: [],
+        initial_dump: true,
+      }));
+    } catch {}
+    // Polymarket idle-closes around ~60 s; ping every 25 s is well inside that.
+    pmPing = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try { ws.send("PING"); } catch {}
+      }
+    }, 25_000);
+  };
+
+  ws.onerror = () => {
+    if (isStale()) return;
+    // Don't paint "err" here — the close handler will do it with retry timing.
+    // onerror often fires immediately before a close; double-painting causes flicker.
+  };
+
+  ws.onclose = () => {
+    if (isStale()) return;
+    if (pmPing) { clearInterval(pmPing); pmPing = null; }
+    pmWs = null;
+    if (!pmTokens) return;
+    const delay = Math.min(pmRetryDelay, 15_000);
+    setConn($("pmConn"), "warn", `reconnecting in ${Math.round(delay / 1000)}s`);
+    pmRetryDelay = Math.min(pmRetryDelay * 2, 15_000);
+    pmReconnectTimer = setTimeout(connectPmWs, delay);
+  };
+
+  ws.onmessage = e => {
+    if (isStale()) return;
+    if (e.data === "PONG") return;
+    let msgs;
+    try { msgs = JSON.parse(e.data); } catch { return; }
+    if (!Array.isArray(msgs)) msgs = [msgs];
+
+    for (const msg of msgs) {
+      const aid = msg.asset_id;
+      const slot = aid === pmTokens.a.id ? "a" : aid === pmTokens.b.id ? "b" : null;
+      if (!slot) continue;
+
+      if (msg.event_type === "book") {
+        const mp = midpointFromBook(msg);
+        if (mp != null) pmTokens[slot].price = mp;
+      } else if (msg.event_type === "price_change") {
+        if (msg.last_traded_price) pmTokens[slot].price = parseFloat(msg.last_traded_price);
+      } else if (msg.event_type === "last_trade_price" && msg.price) {
+        pmTokens[slot].price = parseFloat(msg.price);
+      }
+    }
+    renderPm();
+  };
+}
+
+loadAndConnectPm();
+
+// -------------------------------------------------------------------------
+// Tick: clock, candle countdown, market countdown
+// -------------------------------------------------------------------------
+// Local 5-minute progress bar — purely client-side, resets on each
+// :00/:05/:10/... boundary of the local clock.
+function tickProgress() {
+  const now = Date.now();
+  const ms = now % 300_000;
+  $("progBar").style.width = (ms / 300_000) * 100 + "%";
+
+  $("clock").textContent = hhmmss(now) + " UTC " + new Date(now).toUTCString().slice(17, 22);
+
+  if (pmMarket && pmMarket.endMs) {
+    $("pmEta").textContent = fmtRemain(pmMarket.endMs - now);
+  }
+  requestAnimationFrame(tickProgress);
+}
+requestAnimationFrame(tickProgress);
+</script>
+</body>
+</html>
